@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none" role="img" aria-label="TrueFormat logo">
+  <defs>
+    <linearGradient id="tfGradient" x1="70" y1="70" x2="442" y2="442" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#020617"/>
+      <stop offset="0.48" stop-color="#059669"/>
+      <stop offset="1" stop-color="#38BDF8"/>
+    </linearGradient>
+    <linearGradient id="tfStroke" x1="70" y1="80" x2="442" y2="430" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#059669"/>
+      <stop offset="1" stop-color="#38BDF8"/>
+    </linearGradient>
+    <clipPath id="circleClip">
+      <circle cx="256" cy="256" r="190"/>
+    </clipPath>
+  </defs>
+
+  <circle cx="256" cy="256" r="200" stroke="url(#tfStroke)" stroke-width="14" opacity="0.95"/>
+  <path d="M72 174C112 116 178 80 256 80C334 80 400 116 440 174" stroke="url(#tfStroke)" stroke-width="14" stroke-linecap="round"/>
+
+  <g clip-path="url(#circleClip)">
+    <rect x="56" y="148" width="400" height="228" fill="url(#tfGradient)"/>
+    <path d="M110 154H402L368 198H290V400L252 438L214 400V198H140L110 154Z" fill="#020617" opacity="0.9"/>
+    <path d="M274 210H408L378 254H326V302H370L346 344H326V394L274 438V210Z" fill="#F8FAFC" opacity="0.94"/>
+  </g>
+</svg>
