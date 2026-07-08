@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <menuitem id="menu_trueformat_root"
+              name="TrueFormat"
+              web_icon="trueformat,static/description/icon.png"
+              sequence="90"/>
+
+    <menuitem id="menu_trueformat_check"
+              name="CSV Integrity Check"
+              parent="menu_trueformat_root"
+              action="action_trueformat_check_wizard"
+              sequence="10"/>
+
+</odoo>
