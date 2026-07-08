@@ -16,8 +16,10 @@ except ImportError:
 
 # Config keys stored in System Parameters (Settings > Technical > Parameters).
 PARAM_ENDPOINT = "trueformat.api_endpoint"
+PARAM_FIX_ENDPOINT = "trueformat.api_fix_endpoint"
 PARAM_API_KEY = "trueformat.api_key"
 DEFAULT_ENDPOINT = "https://trueformat-api.onrender.com/check"
+DEFAULT_FIX_ENDPOINT = "https://trueformat-api.onrender.com/fix"
 
 # Server-side limits (MAX_UPLOAD_BYTES / CSV_SANDBOX_ROW_LIMIT on the API).
 # Checked client-side too so oversized files fail fast with a clear message.
@@ -40,6 +42,8 @@ class TrueFormatCheckWizard(models.TransientModel):
     result_detail = fields.Text(string="Report", readonly=True)
     issues_found = fields.Integer(string="Issues Found", readonly=True)
     row_count = fields.Integer(string="Rows Checked", readonly=True)
+    fixed_file = fields.Binary(string="Corrected File", readonly=True)
+    fixed_filename = fields.Char(readonly=True)
 
     def _get_config(self):
         """Read endpoint + API key from system parameters."""
@@ -108,9 +112,12 @@ class TrueFormatCheckWizard(models.TransientModel):
             detail,
         )
 
-    def action_check(self):
-        """Send the uploaded CSV to the TrueFormat API and show the result."""
-        self.ensure_one()
+    def _post_csv(self, endpoint):
+        """Validate the attached CSV and POST it to a TrueFormat endpoint.
+
+        Returns the successful (HTTP 200) requests.Response; raises
+        UserError for anything else.
+        """
         if requests is None:
             raise UserError(_("The Python `requests` library is not installed on the server."))
         if not self.csv_file:
@@ -120,7 +127,7 @@ class TrueFormatCheckWizard(models.TransientModel):
         if not filename.lower().endswith(".csv"):
             raise UserError(_("TrueFormat only checks .csv files."))
 
-        endpoint, api_key = self._get_config()
+        _, api_key = self._get_config()
         file_bytes = base64.b64decode(self.csv_file)
         if len(file_bytes) > MAX_FILE_BYTES:
             raise UserError(
@@ -142,6 +149,22 @@ class TrueFormatCheckWizard(models.TransientModel):
 
         if response.status_code != 200:
             raise UserError(self._api_error_message(response))
+        return response
+
+    def _reopen(self):
+        return {
+            "type": "ir.actions.act_window",
+            "res_model": self._name,
+            "res_id": self.id,
+            "view_mode": "form",
+            "target": "new",
+        }
+
+    def action_check(self):
+        """Send the uploaded CSV to the TrueFormat API and show the result."""
+        self.ensure_one()
+        icp = self.env["ir.config_parameter"].sudo()
+        response = self._post_csv(icp.get_param(PARAM_ENDPOINT, DEFAULT_ENDPOINT))
 
         try:
             data = response.json()
@@ -167,13 +190,31 @@ class TrueFormatCheckWizard(models.TransientModel):
                 "result_detail": "\n".join(detail_lines) or _("Nothing flagged."),
             }
         )
-        return {
-            "type": "ir.actions.act_window",
-            "res_model": self._name,
-            "res_id": self.id,
-            "view_mode": "form",
-            "target": "new",
-        }
+        return self._reopen()
+
+    def action_fix(self):
+        """Fetch a corrected copy of the CSV from the TrueFormat API.
+
+        Only safe mechanical corrections are applied server-side; issues
+        needing human judgment (ambiguous dates, near-duplicates) or where
+        data was destroyed (scientific-notation IDs) stay in the report
+        and are not auto-fixed.
+        """
+        self.ensure_one()
+        icp = self.env["ir.config_parameter"].sudo()
+        response = self._post_csv(icp.get_param(PARAM_FIX_ENDPOINT, DEFAULT_FIX_ENDPOINT))
+
+        if not response.content or "text/csv" not in response.headers.get("Content-Type", ""):
+            raise UserError(_("TrueFormat returned an unexpected response."))
+
+        filename = self.csv_filename or "upload.csv"
+        self.write(
+            {
+                "fixed_file": base64.b64encode(response.content),
+                "fixed_filename": "fixed_%s" % filename,
+            }
+        )
+        return self._reopen()
 
     def action_reset(self):
         self.ensure_one()
@@ -184,12 +225,8 @@ class TrueFormatCheckWizard(models.TransientModel):
                 "result_detail": False,
                 "issues_found": 0,
                 "row_count": 0,
+                "fixed_file": False,
+                "fixed_filename": False,
             }
         )
-        return {
-            "type": "ir.actions.act_window",
-            "res_model": self._name,
-            "res_id": self.id,
-            "view_mode": "form",
-            "target": "new",
-        }
+        return self._reopen()
