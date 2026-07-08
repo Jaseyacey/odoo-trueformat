@@ -127,7 +127,9 @@ class TrueFormatCheckWizard(models.TransientModel):
         if not filename.lower().endswith(".csv"):
             raise UserError(_("TrueFormat only checks .csv files."))
 
-        _, api_key = self._get_config()
+        # NB: never unpack into `_` here — it would shadow odoo's translation
+        # function and break every error message below.
+        _endpoint, api_key = self._get_config()
         file_bytes = base64.b64decode(self.csv_file)
         if len(file_bytes) > MAX_FILE_BYTES:
             raise UserError(
@@ -179,6 +181,13 @@ class TrueFormatCheckWizard(models.TransientModel):
         #   "flags": [ {column, row_index, issue_type, original_value, detail} ] }
         flags = data.get("flags") or []
         detail_lines = [self._format_flag(f) for f in flags]
+        # The API caps the flag list on very dirty files; issues_found is
+        # always the true total.
+        total = data.get("issues_found", len(flags))
+        if total > len(flags):
+            detail_lines.append(
+                _("... and %s more issue(s) not shown.") % (total - len(flags))
+            )
 
         self.write(
             {
