@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+
+    <record id="view_trueformat_check_wizard_form" model="ir.ui.view">
+        <field name="name">trueformat.check.wizard.form</field>
+        <field name="model">trueformat.check.wizard</field>
+        <field name="arch" type="xml">
+            <form string="TrueFormat CSV Integrity Check">
+                <group invisible="state != 'draft'">
+                    <field name="csv_file" filename="csv_filename"/>
+                    <field name="csv_filename" invisible="1"/>
+                </group>
+                <div invisible="state != 'draft'" class="text-muted">
+                    The file is checked in-memory. Nothing is stored.
+                    Limits: .csv files up to 20 MB / 250,000 rows.
+                </div>
+
+                <group invisible="state != 'done'">
+                    <field name="issues_found" readonly="1"/>
+                    <field name="row_count" readonly="1"/>
+                    <field name="result_summary" readonly="1"/>
+                    <field name="result_detail" readonly="1" widget="text"/>
+                </group>
+
+                <footer>
+                    <button name="action_check" string="Check File" type="object"
+                            class="btn-primary" invisible="state != 'draft'"/>
+                    <button name="action_reset" string="Check Another" type="object"
+                            class="btn-secondary" invisible="state != 'done'"/>
+                    <button string="Close" class="btn-secondary" special="cancel"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+
+    <record id="action_trueformat_check_wizard" model="ir.actions.act_window">
+        <field name="name">CSV Integrity Check</field>
+        <field name="res_model">trueformat.check.wizard</field>
+        <field name="view_mode">form</field>
+        <field name="target">new</field>
+    </record>
+
+</odoo>
