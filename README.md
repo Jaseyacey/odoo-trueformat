@@ -31,12 +31,20 @@ Set your API key in **Settings → Technical → Parameters → System Parameter
 |---|---|
 | `trueformat.api_key` | Your TrueFormat integration API key (required) |
 | `trueformat.api_endpoint` | Override only if not using the default `https://trueformat-api.onrender.com/check` |
+| `trueformat.api_fix_endpoint` | Override only if not using the default `https://trueformat-api.onrender.com/fix` |
 
 ## Usage
 
 Open **TrueFormat → CSV Integrity Check**, attach a `.csv` file and click
 **Check File**. The report lists every flagged cell or column with its issue
 type, location, original value, and an explanation.
+
+From the report screen, **Get Corrected File** downloads a copy with safe
+mechanical corrections applied (trimming, empty row/column removal,
+duplicate header renaming). Issues that need human judgment — ambiguous
+dates, near-duplicate values — or where Excel already destroyed data
+(scientific-notation IDs, stripped leading zeros) are never auto-fixed;
+they stay in the report so you can correct them at the source.
 
 Limits enforced by the API: `.csv` files up to **20 MB** / **250,000 rows**.
 

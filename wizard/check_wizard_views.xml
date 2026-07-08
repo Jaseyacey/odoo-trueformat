@@ -20,11 +20,21 @@
                     <field name="row_count" readonly="1"/>
                     <field name="result_summary" readonly="1"/>
                     <field name="result_detail" readonly="1" widget="text"/>
+                    <field name="fixed_file" filename="fixed_filename"
+                           readonly="1" invisible="not fixed_file"/>
+                    <field name="fixed_filename" invisible="1"/>
                 </group>
+                <div invisible="state != 'done' or not fixed_file" class="text-muted">
+                    Only safe mechanical corrections are applied. Issues needing
+                    human judgment (ambiguous dates, near-duplicates) or where
+                    data was already lost remain listed in the report.
+                </div>
 
                 <footer>
                     <button name="action_check" string="Check File" type="object"
                             class="btn-primary" invisible="state != 'draft'"/>
+                    <button name="action_fix" string="Get Corrected File" type="object"
+                            class="btn-primary" invisible="state != 'done' or fixed_file"/>
                     <button name="action_reset" string="Check Another" type="object"
                             class="btn-secondary" invisible="state != 'done'"/>
                     <button string="Close" class="btn-secondary" special="cancel"/>
