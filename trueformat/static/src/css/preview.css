@@ -1,0 +1,129 @@
+.o_trueformat_preview {
+    border: 1px solid #d8dadd;
+    border-radius: 8px;
+    background: #fff;
+    overflow: hidden;
+}
+
+.o_trueformat_preview__toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 16px;
+    border-bottom: 1px solid #e9ecef;
+    background: #fafbfc;
+}
+
+.o_trueformat_preview__title {
+    font-size: 15px;
+    font-weight: 600;
+    color: #212529;
+}
+
+.o_trueformat_preview__actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.o_trueformat_preview__toggle {
+    display: inline-flex;
+    border: 1px solid #d0d7de;
+    border-radius: 6px;
+    overflow: hidden;
+    background: #fff;
+}
+
+.o_trueformat_preview__toggle button {
+    border: 0;
+    background: transparent;
+    padding: 6px 12px;
+    font-size: 12px;
+    color: #57606a;
+}
+
+.o_trueformat_preview__toggle button.is-active {
+    background: #eef2ff;
+    color: #4f46e5;
+    font-weight: 600;
+}
+
+.o_trueformat_preview__table-wrap {
+    overflow: auto;
+    max-height: 420px;
+}
+
+.o_trueformat_preview table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+}
+
+.o_trueformat_preview thead th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: #f6f8fa;
+    border-bottom: 1px solid #d8dadd;
+    padding: 10px 12px;
+    text-align: left;
+    white-space: nowrap;
+    font-weight: 600;
+    color: #24292f;
+}
+
+.o_trueformat_preview__col-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.o_trueformat_preview__fix-col {
+    border: 1px solid #c7d2fe;
+    background: #eef2ff;
+    color: #4f46e5;
+    border-radius: 4px;
+    padding: 2px 8px;
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.o_trueformat_preview tbody td {
+    border-bottom: 1px solid #f0f1f3;
+    padding: 8px 12px;
+    white-space: nowrap;
+    color: #24292f;
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.o_trueformat_preview tbody tr:hover td {
+    background: #fafbfc;
+}
+
+.o_trueformat_preview__cell--error {
+    background: #ffe4e6 !important;
+    color: #9f1239;
+}
+
+.o_trueformat_preview__summary {
+    padding: 12px 16px;
+    border-bottom: 1px solid #e9ecef;
+    color: #57606a;
+    font-size: 13px;
+}
+
+.o_trueformat_preview__empty {
+    padding: 24px;
+    text-align: center;
+    color: #6c757d;
+}
+
+.o_trueformat_preview__issue-tip {
+    cursor: help;
+    border-bottom: 1px dotted #be123c;
+}

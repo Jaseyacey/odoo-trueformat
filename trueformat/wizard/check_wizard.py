@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
 import base64
+import csv
+import io
 import json
 import logging
 
@@ -22,9 +24,8 @@ DEFAULT_ENDPOINT = "https://trueformat-api.onrender.com/check"
 DEFAULT_FIX_ENDPOINT = "https://trueformat-api.onrender.com/fix"
 
 # Server-side limits (MAX_UPLOAD_BYTES / CSV_SANDBOX_ROW_LIMIT on the API).
-# Checked client-side too so oversized files fail fast with a clear message.
 MAX_FILE_BYTES = 20 * 1024 * 1024
-MAX_ROWS = 250000
+PREVIEW_ROW_LIMIT = 1000
 
 
 class TrueFormatCheckWizard(models.TransientModel):
@@ -39,9 +40,9 @@ class TrueFormatCheckWizard(models.TransientModel):
         default="draft",
     )
     result_summary = fields.Char(string="Summary", readonly=True)
-    result_detail = fields.Text(string="Report", readonly=True)
     issues_found = fields.Integer(string="Issues Found", readonly=True)
     row_count = fields.Integer(string="Rows Checked", readonly=True)
+    preview_data = fields.Text(string="Preview Data", readonly=True)
     fixed_file = fields.Binary(string="Corrected File", readonly=True)
     fixed_filename = fields.Char(readonly=True)
 
@@ -54,42 +55,15 @@ class TrueFormatCheckWizard(models.TransientModel):
             raise UserError(
                 _(
                     "No TrueFormat API key set.\n\n"
-                    "Add it in Settings > Technical > Parameters > "
+                    "Add your API key in Settings > Technical > Parameters > "
                     "System Parameters using the key '%s'."
                 )
                 % PARAM_API_KEY
             )
         return endpoint, api_key
 
-    @staticmethod
-    def _format_flag(flag):
-        """One report line per flag, matching the API flag shape:
-        {column, row_index (0-based or null), issue_type, original_value, detail}
-        """
-        issue_type = flag.get("issue_type", "issue")
-        column = flag.get("column", "?")
-        detail = flag.get("detail", "")
-        row_index = flag.get("row_index")
-        original = flag.get("original_value")
-
-        if row_index is None:
-            location = _("column '%s' (whole column)") % column
-        else:
-            # API row_index is 0-based over data rows; show 1-based.
-            location = _("column '%s', data row %s") % (column, row_index + 1)
-
-        line = "- [%s] %s: %s" % (issue_type, location, detail)
-        if original:
-            line += _(" (value: %s)") % json.dumps(original)
-        return line
-
     def _api_error_message(self, response):
-        """Turn a FastAPI error response into a readable message.
-
-        Errors come back as {"detail": "..."} with 400 (bad file / over
-        limit), 401 (bad key), 429 (rate limited) or 503 (key not
-        configured server-side).
-        """
+        """Turn a FastAPI error response into a readable message."""
         try:
             detail = response.json().get("detail", "")
         except ValueError:
@@ -113,11 +87,7 @@ class TrueFormatCheckWizard(models.TransientModel):
         )
 
     def _post_csv(self, endpoint):
-        """Validate the attached CSV and POST it to a TrueFormat endpoint.
-
-        Returns the successful (HTTP 200) requests.Response; raises
-        UserError for anything else.
-        """
+        """Validate the attached CSV and POST it to a TrueFormat endpoint."""
         if requests is None:
             raise UserError(_("The Python `requests` library is not installed on the server."))
         if not self.csv_file:
@@ -127,8 +97,6 @@ class TrueFormatCheckWizard(models.TransientModel):
         if not filename.lower().endswith(".csv"):
             raise UserError(_("TrueFormat only checks .csv files."))
 
-        # NB: never unpack into `_` here — it would shadow odoo's translation
-        # function and break every error message below.
         _endpoint, api_key = self._get_config()
         file_bytes = base64.b64decode(self.csv_file)
         if len(file_bytes) > MAX_FILE_BYTES:
@@ -153,6 +121,111 @@ class TrueFormatCheckWizard(models.TransientModel):
             raise UserError(self._api_error_message(response))
         return response
 
+    def _validate_csv_upload(self):
+        if not self.csv_file:
+            raise UserError(_("Please attach a CSV file first."))
+
+        filename = self.csv_filename or "upload.csv"
+        if not filename.lower().endswith(".csv"):
+            raise UserError(_("TrueFormat only checks .csv files."))
+
+        file_bytes = base64.b64decode(self.csv_file)
+        if len(file_bytes) > MAX_FILE_BYTES:
+            raise UserError(
+                _("The file is larger than the 20 MB limit of the TrueFormat API.")
+            )
+        return filename, file_bytes
+
+    def _build_preview_data(self, file_bytes, flags, total_rows):
+        """Build JSON payload for the interactive preview widget."""
+        text = file_bytes.decode("utf-8-sig", errors="replace")
+        rows = list(csv.reader(io.StringIO(text)))
+        header = rows[0] if rows else []
+        data_rows = rows[1:] if len(rows) > 1 else []
+
+        error_cells = {}
+        column_counts = {}
+        error_row_indices = set()
+
+        for flag in flags:
+            column = flag.get("column")
+            row_index = flag.get("row_index")
+            if column:
+                column_counts[column] = column_counts.get(column, 0) + 1
+            if row_index is not None and column:
+                error_cells.setdefault((row_index, column), []).append(flag)
+                error_row_indices.add(row_index)
+
+        preview_indices = []
+        for row_index in sorted(error_row_indices):
+            if len(preview_indices) >= PREVIEW_ROW_LIMIT:
+                break
+            preview_indices.append(row_index)
+        for row_index in range(len(data_rows)):
+            if len(preview_indices) >= PREVIEW_ROW_LIMIT:
+                break
+            if row_index not in error_row_indices:
+                preview_indices.append(row_index)
+
+        preview_rows = []
+        for row_index in preview_indices:
+            row = data_rows[row_index] if row_index < len(data_rows) else []
+            cells = []
+            for col_index, column_name in enumerate(header):
+                value = row[col_index] if col_index < len(row) else ""
+                cell_flags = error_cells.get((row_index, column_name), [])
+                cells.append(
+                    {
+                        "value": value,
+                        "has_error": bool(cell_flags),
+                        "issues": [
+                            {
+                                "issue_type": f.get("issue_type", "issue"),
+                                "detail": f.get("detail", ""),
+                            }
+                            for f in cell_flags
+                        ],
+                    }
+                )
+            preview_rows.append(
+                {
+                    "row_index": row_index,
+                    "has_error": row_index in error_row_indices,
+                    "cells": cells,
+                }
+            )
+
+        return {
+            "headers": [
+                {
+                    "name": column_name,
+                    "issue_count": column_counts.get(column_name, 0),
+                    "has_issues": column_counts.get(column_name, 0) > 0,
+                }
+                for column_name in header
+            ],
+            "rows": preview_rows,
+            "preview_row_count": len(preview_rows),
+            "total_row_count": total_rows,
+            "total_issues": sum(column_counts.values()) or len(flags),
+        }
+
+    def _apply_check_result(self, data, file_bytes):
+        flags = data.get("flags") or []
+        total_rows = data.get("row_count", 0)
+        preview = self._build_preview_data(file_bytes, flags, total_rows)
+
+        self.write(
+            {
+                "state": "done",
+                "issues_found": data.get("issues_found", len(flags)),
+                "row_count": total_rows,
+                "result_summary": data.get("summary")
+                or _("No issues found — file is clean."),
+                "preview_data": json.dumps(preview),
+            }
+        )
+
     def _reopen(self):
         return {
             "type": "ir.actions.act_window",
@@ -165,6 +238,7 @@ class TrueFormatCheckWizard(models.TransientModel):
     def action_check(self):
         """Send the uploaded CSV to the TrueFormat API and show the result."""
         self.ensure_one()
+        filename, file_bytes = self._validate_csv_upload()
         icp = self.env["ir.config_parameter"].sudo()
         response = self._post_csv(icp.get_param(PARAM_ENDPOINT, DEFAULT_ENDPOINT))
 
@@ -175,48 +249,21 @@ class TrueFormatCheckWizard(models.TransientModel):
         if data.get("status") != "success":
             raise UserError(_("TrueFormat returned an unexpected response."))
 
-        # Success shape:
-        # { "status": "success", "filename": str, "row_count": int,
-        #   "column_count": int, "issues_found": int, "summary": str,
-        #   "flags": [ {column, row_index, issue_type, original_value, detail} ] }
-        flags = data.get("flags") or []
-        detail_lines = [self._format_flag(f) for f in flags]
-        # The API caps the flag list on very dirty files; issues_found is
-        # always the true total.
-        total = data.get("issues_found", len(flags))
-        if total > len(flags):
-            detail_lines.append(
-                _("... and %s more issue(s) not shown.") % (total - len(flags))
-            )
-
-        self.write(
-            {
-                "state": "done",
-                "issues_found": data.get("issues_found", len(flags)),
-                "row_count": data.get("row_count", 0),
-                "result_summary": data.get("summary")
-                or _("No issues found — file is clean."),
-                "result_detail": "\n".join(detail_lines) or _("Nothing flagged."),
-            }
-        )
+        self._apply_check_result(data, file_bytes)
         return self._reopen()
 
     def action_fix(self):
-        """Fetch a corrected copy of the CSV from the TrueFormat API.
-
-        Only safe mechanical corrections are applied server-side; issues
-        needing human judgment (ambiguous dates, near-duplicates) or where
-        data was destroyed (scientific-notation IDs) stay in the report
-        and are not auto-fixed.
-        """
+        """Fetch a corrected copy of the CSV from the TrueFormat API."""
         self.ensure_one()
+        filename, file_bytes = self._validate_csv_upload()
         icp = self.env["ir.config_parameter"].sudo()
         response = self._post_csv(icp.get_param(PARAM_FIX_ENDPOINT, DEFAULT_FIX_ENDPOINT))
 
-        if not response.content or "text/csv" not in response.headers.get("Content-Type", ""):
+        if not response.content or "text/csv" not in response.headers.get(
+            "Content-Type", ""
+        ):
             raise UserError(_("TrueFormat returned an unexpected response."))
 
-        filename = self.csv_filename or "upload.csv"
         self.write(
             {
                 "fixed_file": base64.b64encode(response.content),
@@ -231,7 +278,7 @@ class TrueFormatCheckWizard(models.TransientModel):
             {
                 "state": "draft",
                 "result_summary": False,
-                "result_detail": False,
+                "preview_data": False,
                 "issues_found": 0,
                 "row_count": 0,
                 "fixed_file": False,
