@@ -7,7 +7,7 @@
 TrueFormat CSV Integrity Check
 ==============================
 
-Excel silently corrupts CSV data before ERP import — scientific notation on
+Excel silently corrupts CSV data before ERP import - scientific notation on
 long IDs, stripped leading zeros, flipped dates, hidden characters, and
 near-duplicate records. Odoo's import engine validates structure, not values,
 so this corruption passes through undetected and surfaces later as

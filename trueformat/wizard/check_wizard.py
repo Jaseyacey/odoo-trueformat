@@ -221,7 +221,7 @@ class TrueFormatCheckWizard(models.TransientModel):
                 "issues_found": data.get("issues_found", len(flags)),
                 "row_count": total_rows,
                 "result_summary": data.get("summary")
-                or _("No issues found — file is clean."),
+                or _("No issues found - file is clean."),
                 "preview_data": json.dumps(preview),
             }
         )
