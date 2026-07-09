@@ -1,7 +1,7 @@
 <section class="oe_container">
     <div class="oe_row oe_spaced">
         <div class="oe_span12">
-            <img src="banner.png" alt="TrueFormat — Catch silent CSV corruption before import"
+              <img src="banner.png" alt="TrueFormat - Catch silent CSV corruption before import"
                  style="max-width: 100%; border-radius: 8px;"/>
         </div>
     </div>
@@ -9,7 +9,7 @@
         <div class="oe_span12">
             <h2 class="oe_slogan">Catch silent CSV corruption before it reaches Odoo's import engine</h2>
             <p class="oe_mt32">
-                Excel silently corrupts CSV data before ERP import — scientific notation on long
+                Excel silently corrupts CSV data before ERP import - scientific notation on long
                 IDs, stripped leading zeros, flipped dates, hidden characters, and near-duplicate
                 records. Odoo's import engine validates structure, not values, so this corruption
                 passes through undetected and surfaces later as reconciliation and reporting
@@ -66,8 +66,8 @@
         </div>
         <div class="oe_span6">
             <h4>Hidden characters</h4>
-            <p>Zero-width spaces, non-breaking spaces, control characters and stray CSV
-               metacharacters inside fields — each reported with its exact position.</p>
+                <p>Zero-width spaces, non-breaking spaces, control characters and stray CSV
+                    metacharacters inside fields - each reported with its exact position.</p>
             <h4>Date corruption</h4>
             <p>Ambiguous day/month values, mixed date formats within a column, and
                spreadsheet date serials.</p>
@@ -77,7 +77,7 @@
             <p>Scientific notation on long identifiers, stripped leading zeros, and cells
                that break their column's dominant format.</p>
             <h4>Near-duplicate records</h4>
-            <p>Values that differ only in case, whitespace or trailing punctuation —
+                <p>Values that differ only in case, whitespace or trailing punctuation -
                grouped, with every raw variant listed.</p>
         </div>
     </div>
@@ -90,17 +90,17 @@
             <ol>
                 <li>Open <b>TrueFormat &rarr; CSV Integrity Check</b> and attach a <code>.csv</code> file
                     (up to 20&nbsp;MB / 250,000 rows).</li>
-                <li>Click <b>Check File</b> — the report lists every flagged cell or column with its
+                <li>Click <b>Check File</b> - the report lists every flagged cell or column with its
                     issue type, location, original value and an explanation.</li>
                 <li>Optionally click <b>Get Corrected File</b> to download a copy with safe mechanical
                     corrections applied. Issues that need human judgment, or where data was already
-                    destroyed by the spreadsheet tool, are never auto-fixed — they stay in the report
+                    destroyed by the spreadsheet tool, are never auto-fixed - they stay in the report
                     so you can correct them at the source.</li>
             </ol>
             <p class="oe_mt32">
                 The module is a thin connector: all detection logic runs on the TrueFormat API, files
                 are processed in-memory, and nothing is stored. Configuration is two system
-                parameters — <code>trueformat.api_key</code> and (optionally)
+                parameters - <code>trueformat.api_key</code> and (optionally)
                 <code>trueformat.api_endpoint</code>.
             </p>
             <p>Requires an active TrueFormat subscription (&pound;5,000 per year or &pound;800 per
