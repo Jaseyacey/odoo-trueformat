@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+
+    <t t-name="trueformat.PreviewField">
+        <div class="o_trueformat_preview" t-if="hasPreview">
+            <div class="o_trueformat_preview__summary" t-if="props.record.data.result_summary">
+                <t t-esc="props.record.data.result_summary"/>
+            </div>
+
+            <div class="o_trueformat_preview__toolbar">
+                <div class="o_trueformat_preview__title">
+                    Preview (<t t-esc="visibleRowCount"/> of <t t-esc="preview.total_row_count"/> rows)
+                </div>
+                <div class="o_trueformat_preview__actions" t-if="preview.total_issues">
+                    <span class="badge text-bg-danger">
+                        <t t-esc="preview.total_issues"/> issues
+                    </span>
+                    <div class="o_trueformat_preview__toggle">
+                        <button type="button"
+                                t-att-class="{'is-active': !state.errorsOnly}"
+                                t-on-click="() => this.setErrorsOnly(false)">
+                            View All Rows
+                        </button>
+                        <button type="button"
+                                t-att-class="{'is-active': state.errorsOnly}"
+                                t-on-click="() => this.setErrorsOnly(true)">
+                            View Errors Only
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="o_trueformat_preview__table-wrap" t-if="displayRows.length">
+                <table>
+                    <thead>
+                        <tr>
+                            <th t-foreach="preview.headers" t-as="header" t-key="header.name">
+                                <div class="o_trueformat_preview__col-head">
+                                    <span t-esc="header.name"/>
+                                    <span class="o_trueformat_preview__fix-col"
+                                          t-if="header.has_issues"
+                                          t-att-title="'Fix ' + header.issue_count + ' issue(s) in this column'">
+                                        Fix <t t-esc="header.issue_count"/>
+                                    </span>
+                                </div>
+                            </th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr t-foreach="displayRows" t-as="row" t-key="row.row_index">
+                            <td t-foreach="row.cells" t-as="cell" t-key="row.row_index + '_' + cell_index"
+                                t-att-class="{'o_trueformat_preview__cell--error': cell.has_error}"
+                                t-att-title="cellTitle(cell)">
+                                <span t-att-class="{'o_trueformat_preview__issue-tip': cell.has_error}"
+                                      t-esc="cell.value"/>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="o_trueformat_preview__empty" t-else="">
+                No rows match the current filter.
+            </div>
+        </div>
+        <div class="o_trueformat_preview__empty" t-else="">
+            Run a check to preview flagged cells.
+        </div>
+    </t>
+
+</templates>

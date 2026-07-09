@@ -6,35 +6,44 @@
         <field name="model">trueformat.check.wizard</field>
         <field name="arch" type="xml">
             <form string="TrueFormat CSV Integrity Check">
-                <group invisible="state != 'draft'">
-                    <field name="csv_file" filename="csv_filename"/>
-                    <field name="csv_filename" invisible="1"/>
-                </group>
-                <div invisible="state != 'draft'" class="text-muted">
-                    The file is checked in-memory. Nothing is stored.
-                    Limits: .csv files up to 20 MB / 250,000 rows.
-                </div>
+                <sheet>
+                    <group invisible="state != 'draft'">
+                        <field name="csv_file" filename="csv_filename"/>
+                        <field name="csv_filename" invisible="1"/>
+                    </group>
+                    <div invisible="state != 'draft'" class="text-muted">
+                        The file is checked in-memory. Nothing is stored.
+                        Limits: .csv files up to 20 MB / 250,000 rows.
+                    </div>
+                    <div invisible="state != 'draft'" class="alert alert-info mt-2" role="alert">
+                        Requires a TrueFormat API key in
+                        Settings → Technical → Parameters → System Parameters
+                        (<code>trueformat.api_key</code>).
+                    </div>
 
-                <group invisible="state != 'done'">
-                    <field name="issues_found" readonly="1"/>
-                    <field name="row_count" readonly="1"/>
-                    <field name="result_summary" readonly="1"/>
-                    <field name="result_detail" readonly="1" widget="text"/>
-                    <field name="fixed_file" filename="fixed_filename"
-                           readonly="1" invisible="not fixed_file"/>
-                    <field name="fixed_filename" invisible="1"/>
-                </group>
-                <div invisible="state != 'done' or not fixed_file" class="text-muted">
-                    Only safe mechanical corrections are applied. Issues needing
-                    human judgment (ambiguous dates, near-duplicates) or where
-                    data was already lost remain listed in the report.
-                </div>
+                    <div invisible="state != 'done'">
+                        <field name="issues_found" invisible="1"/>
+                        <field name="row_count" invisible="1"/>
+                        <field name="result_summary" invisible="1"/>
+                        <field name="preview_data" widget="trueformat_preview" nolabel="1"/>
+
+                        <group invisible="not fixed_file" class="mt-3">
+                            <field name="fixed_file" filename="fixed_filename" readonly="1"/>
+                            <field name="fixed_filename" invisible="1"/>
+                        </group>
+                        <div invisible="not fixed_file" class="text-muted">
+                            Download the corrected file, then re-upload it and run Check File again
+                            to verify remaining issues.
+                        </div>
+                    </div>
+                </sheet>
 
                 <footer>
                     <button name="action_check" string="Check File" type="object"
                             class="btn-primary" invisible="state != 'draft'"/>
-                    <button name="action_fix" string="Get Corrected File" type="object"
-                            class="btn-primary" invisible="state != 'done' or fixed_file"/>
+                    <button name="action_fix" string="Fix All Columns" type="object"
+                            class="btn-primary"
+                            invisible="state != 'done' or fixed_file or issues_found == 0"/>
                     <button name="action_reset" string="Check Another" type="object"
                             class="btn-secondary" invisible="state != 'done'"/>
                     <button string="Close" class="btn-secondary" special="cancel"/>

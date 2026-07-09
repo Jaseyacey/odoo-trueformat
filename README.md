@@ -11,12 +11,13 @@ Files are processed in-memory — nothing is written to disk.
 
 ## Installation
 
-The repository root is the Odoo module itself. Clone it into your addons
-path as a directory named `trueformat` (the module's technical name):
+The module lives in the `trueformat/` folder of this repository. Clone the
+repo and add it to your Odoo addons path (or copy `trueformat/` into an
+existing addons directory):
 
 ```bash
-cd /path/to/odoo/addons
-git clone https://github.com/Jaseyacey/odoo-trueformat.git trueformat
+git clone https://github.com/Jaseyacey/odoo-trueformat.git
+# then start Odoo with:  --addons-path=...,/path/to/odoo-trueformat
 ```
 
 Then update the apps list and install **TrueFormat CSV Integrity Check**.
