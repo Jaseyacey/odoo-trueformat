@@ -75,6 +75,18 @@ class TrueFormatCheckWizard(models.TransientModel):
             return _(
                 "TrueFormat rejected the API key. Check the '%s' system parameter."
             ) % PARAM_API_KEY
+        if response.status_code == 402:
+            return _(
+                "Your TrueFormat subscription is inactive. Renew your plan to "
+                "continue using the API."
+            )
+        if response.status_code == 404:
+            return _(
+                "The TrueFormat server does not provide this endpoint (HTTP 404).\n\n"
+                "The fix endpoint may not be available on the server yet. You can "
+                "override the endpoints via the '%(check_param)s' and "
+                "'%(fix_param)s' system parameters."
+            ) % {"check_param": PARAM_ENDPOINT, "fix_param": PARAM_FIX_ENDPOINT}
         if response.status_code == 503:
             return _(
                 "The TrueFormat server has no integration API key configured. %s"
