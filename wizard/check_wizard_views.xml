@@ -17,7 +17,7 @@
                     </div>
                     <div invisible="state != 'draft'" class="alert alert-info mt-2" role="alert">
                         Requires a TrueFormat API key in
-                        Settings -> Technical -> Parameters -> System Parameters
+                        Settings → Technical → Parameters → System Parameters
                         (<code>trueformat.api_key</code>).
                     </div>
 

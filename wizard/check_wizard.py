@@ -20,8 +20,9 @@ except ImportError:
 PARAM_ENDPOINT = "trueformat.api_endpoint"
 PARAM_FIX_ENDPOINT = "trueformat.api_fix_endpoint"
 PARAM_API_KEY = "trueformat.api_key"
-DEFAULT_ENDPOINT = "https://trueformat-api.onrender.com/check"
-DEFAULT_FIX_ENDPOINT = "https://trueformat-api.onrender.com/fix"
+DEFAULT_ENDPOINT = "https://trueformat.onrender.com/api/check"
+DEFAULT_FIX_ENDPOINT = "https://trueformat.onrender.com/api/fix" 
+
 
 # Server-side limits (MAX_UPLOAD_BYTES / CSV_SANDBOX_ROW_LIMIT on the API).
 MAX_FILE_BYTES = 20 * 1024 * 1024
@@ -40,6 +41,7 @@ class TrueFormatCheckWizard(models.TransientModel):
         default="draft",
     )
     result_summary = fields.Char(string="Summary", readonly=True)
+    result_detail = fields.Text(string="Report", readonly=True)
     issues_found = fields.Integer(string="Issues Found", readonly=True)
     row_count = fields.Integer(string="Rows Checked", readonly=True)
     preview_data = fields.Text(string="Preview Data", readonly=True)
@@ -211,17 +213,52 @@ class TrueFormatCheckWizard(models.TransientModel):
         }
 
     def _apply_check_result(self, data, file_bytes):
+        # Parse TrueFormat's actual response shape
+        summary_data = data.get("summary", {}) or {}
+        if not isinstance(summary_data, dict):
+            summary_data = {}
+        issues = summary_data.get("issue_count", 0)
+        rows = summary_data.get("rows_checked", 0)
+
+        sci = summary_data.get("scientific_notation_count", 0)
+        zeros = summary_data.get("missing_leading_zero_count", 0)
+        sku = summary_data.get("sku_corruption_count", 0)
+
+        cols = data.get("columns", {}) or {}
+        sci_cols = ", ".join(cols.get("scientific_notation_columns") or []) or "-"
+
+        examples = data.get("examples", {}) or {}
+        sku_examples = ", ".join(str(e) for e in (examples.get("sku") or [])[:5])
+
+        summary = (
+            _("No issues found - file is clean. %s rows checked.") % rows
+            if not issues
+            else _("%(issues)s issue(s) found across %(rows)s rows.") % {"issues": issues, "rows": rows}
+        )
+
+        detail_lines = [
+            _("Rows checked: %s") % rows,
+            _("Total issues: %s") % issues,
+            "",
+            _("Scientific notation: %s") % sci,
+            _("Stripped leading zeros: %s") % zeros,
+            _("SKU corruption: %s") % sku,
+            "",
+            _("Affected columns: %s") % sci_cols,
+        ]
+        if sku_examples:
+            detail_lines += ["", _("Examples of corrupted values: %s") % sku_examples]
+
         flags = data.get("flags") or []
-        total_rows = data.get("row_count", 0)
-        preview = self._build_preview_data(file_bytes, flags, total_rows)
+        preview = self._build_preview_data(file_bytes, flags, rows)
 
         self.write(
             {
                 "state": "done",
-                "issues_found": data.get("issues_found", len(flags)),
-                "row_count": total_rows,
-                "result_summary": data.get("summary")
-                or _("No issues found - file is clean."),
+                "issues_found": issues,
+                "row_count": rows,
+                "result_summary": summary,
+                "result_detail": "\n".join(detail_lines),
                 "preview_data": json.dumps(preview),
             }
         )
@@ -246,7 +283,7 @@ class TrueFormatCheckWizard(models.TransientModel):
             data = response.json()
         except ValueError:
             raise UserError(_("TrueFormat returned an unexpected response."))
-        if data.get("status") != "success":
+        if data.get("status") != "ok":
             raise UserError(_("TrueFormat returned an unexpected response."))
 
         self._apply_check_result(data, file_bytes)
@@ -278,6 +315,7 @@ class TrueFormatCheckWizard(models.TransientModel):
             {
                 "state": "draft",
                 "result_summary": False,
+                "result_detail": False,
                 "preview_data": False,
                 "issues_found": 0,
                 "row_count": 0,
