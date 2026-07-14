@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 {
     "name": "TrueFormat CSV Integrity Check",
-    "version": "19.0.1.0.2",
+    "version": "19.0.1.0.4",
     "summary": "Catch silent CSV corruption before it reaches Odoo's import engine.",
     "description": """
 TrueFormat CSV Integrity Check

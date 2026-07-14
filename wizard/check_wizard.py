@@ -391,7 +391,14 @@ class TrueFormatCheckWizard(models.TransientModel):
         ]
         if sku_examples:
             detail_lines += ["", _("Examples of corrupted values: %s") % sku_examples]
-
+        if self.fixed_file and issues:
+            detail_lines += [
+                "",
+                _(
+                    "A corrected file is attached below. Re-download it if you "
+                    "need the latest Fix All Columns output."
+                ),
+            ]
         # /api/check returns summary only — scan locally so error cells light up red.
         flags = data.get("flags") or self._scan_preview_flags(file_bytes, data)
         preview = self._build_preview_data(file_bytes, flags, rows)

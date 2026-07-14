@@ -37,10 +37,10 @@
                             <th t-foreach="preview.headers" t-as="header" t-key="header.name">
                                 <div class="o_trueformat_preview__col-head">
                                     <span t-esc="header.name"/>
-                                    <span class="o_trueformat_preview__fix-col"
+                                    <span class="o_trueformat_preview__issue-col"
                                           t-if="header.has_issues"
-                                          t-att-title="'Fix ' + header.issue_count + ' issue(s) in this column'">
-                                        Fix <t t-esc="header.issue_count"/>
+                                          t-att-title="header.issue_count + ' issue(s) in this column'">
+                                        <t t-esc="header.issue_count"/> issues
                                     </span>
                                 </div>
                             </th>
