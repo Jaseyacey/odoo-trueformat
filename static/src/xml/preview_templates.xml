@@ -47,7 +47,8 @@
                         </tr>
                     </thead>
                     <tbody>
-                        <tr t-foreach="displayRows" t-as="row" t-key="row.row_index">
+                        <tr t-foreach="displayRows" t-as="row" t-key="row.row_index"
+                            t-att-class="{'o_trueformat_preview__row--error': row.has_error}">
                             <td t-foreach="row.cells" t-as="cell" t-key="row.row_index + '_' + cell_index"
                                 t-att-class="{'o_trueformat_preview__cell--error': cell.has_error}"
                                 t-att-title="cellTitle(cell)">

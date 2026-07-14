@@ -32,8 +32,10 @@
                             <field name="fixed_filename" invisible="1"/>
                         </group>
                         <div invisible="not fixed_file" class="text-muted">
-                            Download the corrected file, then re-upload it and run Check File again
-                            to verify remaining issues.
+                            Download the corrected file above. It is the exact
+                            CSV returned by TrueFormat (scientific notation
+                            expanded). Remaining issues (e.g. date tokens in
+                            SKU columns) still need manual review.
                         </div>
                     </div>
                 </sheet>

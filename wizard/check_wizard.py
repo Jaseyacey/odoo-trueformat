@@ -4,6 +4,7 @@ import csv
 import io
 import json
 import logging
+import re
 
 from odoo import _, fields, models
 from odoo.exceptions import UserError
@@ -21,19 +22,38 @@ PARAM_ENDPOINT = "trueformat.api_endpoint"
 PARAM_FIX_ENDPOINT = "trueformat.api_fix_endpoint"
 PARAM_API_KEY = "trueformat.api_key"
 DEFAULT_ENDPOINT = "https://trueformat.onrender.com/api/check"
-DEFAULT_FIX_ENDPOINT = "https://trueformat.onrender.com/api/fix" 
+DEFAULT_FIX_ENDPOINT = "https://trueformat.onrender.com/api/fix"
 
 
 # Server-side limits (MAX_UPLOAD_BYTES / CSV_SANDBOX_ROW_LIMIT on the API).
 MAX_FILE_BYTES = 20 * 1024 * 1024
 PREVIEW_ROW_LIMIT = 1000
+# Cap local scan work so a 250k-row file does not freeze the dialog.
+PREVIEW_FLAG_SCAN_LIMIT = 5000
+PREVIEW_FLAG_MAX = 2000
+
+# Mirrors trueformat_backend/routes/health.py detection so cells can be marked
+# red even though /api/check does not return per-cell flags.
+_SCI_PATTERN = re.compile(r"^[+-]?\d+(\.\d+)?[Ee][+-]?\d+$")
+_DATE_TOKEN_PATTERNS = (
+    re.compile(r"^\d{1,2}[/-]\d{1,2}([/-]\d{2,4})?$"),
+    re.compile(r"^\d{1,2}-[A-Za-z]{3}$"),
+    re.compile(r"^[A-Za-z]{3}-\d{1,2}$"),
+    re.compile(r"^\d{4}-\d{2}-\d{2}$"),
+)
+_MONTH_TOKEN_PATTERN = re.compile(
+    r"(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)", re.IGNORECASE
+)
 
 
 class TrueFormatCheckWizard(models.TransientModel):
     _name = "trueformat.check.wizard"
     _description = "TrueFormat CSV Integrity Check"
 
-    csv_file = fields.Binary(string="CSV File", required=True)
+    # attachment=False keeps bytes on the transient record so the dialog download
+    # still has the corrected payload after _reopen() (ir.attachment links on
+    # TransientModel are unreliable across the client round-trip).
+    csv_file = fields.Binary(string="CSV File", required=True, attachment=False)
     csv_filename = fields.Char(string="Filename")
 
     state = fields.Selection(
@@ -45,7 +65,7 @@ class TrueFormatCheckWizard(models.TransientModel):
     issues_found = fields.Integer(string="Issues Found", readonly=True)
     row_count = fields.Integer(string="Rows Checked", readonly=True)
     preview_data = fields.Text(string="Preview Data", readonly=True)
-    fixed_file = fields.Binary(string="Corrected File", readonly=True)
+    fixed_file = fields.Binary(string="Corrected File", readonly=True, attachment=False)
     fixed_filename = fields.Char(readonly=True)
 
     def _get_config(self):
@@ -83,10 +103,9 @@ class TrueFormatCheckWizard(models.TransientModel):
         if response.status_code == 404:
             return _(
                 "The TrueFormat server does not provide this endpoint (HTTP 404).\n\n"
-                "The fix endpoint may not be available on the server yet. You can "
-                "override the endpoints via the '%(check_param)s' and "
-                "'%(fix_param)s' system parameters."
-            ) % {"check_param": PARAM_ENDPOINT, "fix_param": PARAM_FIX_ENDPOINT}
+                "Check that '%(endpoint_param)s' / '%(fix_param)s' point at "
+                "https://trueformat.onrender.com (not trueformat-api.onrender.com)."
+            ) % {"endpoint_param": PARAM_ENDPOINT, "fix_param": PARAM_FIX_ENDPOINT}
         if response.status_code == 503:
             return _(
                 "The TrueFormat server has no integration API key configured. %s"
@@ -100,23 +119,12 @@ class TrueFormatCheckWizard(models.TransientModel):
             detail,
         )
 
-    def _post_csv(self, endpoint):
-        """Validate the attached CSV and POST it to a TrueFormat endpoint."""
+    def _post_file_bytes(self, endpoint, filename, file_bytes):
+        """POST CSV bytes to a TrueFormat endpoint."""
         if requests is None:
             raise UserError(_("The Python `requests` library is not installed on the server."))
-        if not self.csv_file:
-            raise UserError(_("Please attach a CSV file first."))
 
-        filename = self.csv_filename or "upload.csv"
-        if not filename.lower().endswith(".csv"):
-            raise UserError(_("TrueFormat only checks .csv files."))
-
-        _endpoint, api_key = self._get_config()
-        file_bytes = base64.b64decode(self.csv_file)
-        if len(file_bytes) > MAX_FILE_BYTES:
-            raise UserError(
-                _("The file is larger than the 20 MB limit of the TrueFormat API.")
-            )
+        _unused_endpoint, api_key = self._get_config()
 
         try:
             response = requests.post(
@@ -135,6 +143,48 @@ class TrueFormatCheckWizard(models.TransientModel):
             raise UserError(self._api_error_message(response))
         return response
 
+    def _post_csv(self, endpoint):
+        """Validate the attached CSV and POST it to a TrueFormat endpoint."""
+        filename, file_bytes = self._validate_csv_upload()
+        return self._post_file_bytes(endpoint, filename, file_bytes)
+
+    def _extract_fixed_csv(self, response):
+        """Normalize fix endpoint responses into raw CSV bytes."""
+        content_type = (response.headers.get("Content-Type") or "").lower()
+
+        # Primary path: endpoint returns the CSV file directly.
+        if "text/csv" in content_type or "application/octet-stream" in content_type:
+            if response.content:
+                return response.content
+            raise UserError(_("TrueFormat returned an empty corrected file."))
+
+        # Fallback path: endpoint returns JSON with corrected CSV payload.
+        try:
+            payload = response.json()
+        except ValueError:
+            raise UserError(_("TrueFormat returned an unexpected response."))
+
+        b64_value = (
+            payload.get("fixed_csv_base64")
+            or payload.get("fixed_file_base64")
+            or payload.get("file_base64")
+        )
+        if b64_value:
+            try:
+                return base64.b64decode(b64_value)
+            except Exception:
+                raise UserError(_("TrueFormat returned an invalid corrected file."))
+
+        text_value = payload.get("fixed_csv") or payload.get("csv")
+        if text_value is not None:
+            return text_value.encode("utf-8")
+
+        raise UserError(_("TrueFormat returned an unexpected response."))
+
+    def _b64_store(self, raw_bytes):
+        """Encode raw file bytes for an Odoo Binary field (ASCII str, not bytes)."""
+        return base64.b64encode(raw_bytes).decode("ascii")
+
     def _validate_csv_upload(self):
         if not self.csv_file:
             raise UserError(_("Please attach a CSV file first."))
@@ -149,6 +199,87 @@ class TrueFormatCheckWizard(models.TransientModel):
                 _("The file is larger than the 20 MB limit of the TrueFormat API.")
             )
         return filename, file_bytes
+
+    @staticmethod
+    def _is_probable_date_token(value):
+        token = (value or "").strip()
+        if not token:
+            return False
+        if any(pattern.match(token) for pattern in _DATE_TOKEN_PATTERNS):
+            return True
+        if _MONTH_TOKEN_PATTERN.search(token) and any(ch.isdigit() for ch in token):
+            return True
+        return False
+
+    def _scan_preview_flags(self, file_bytes, check_data):
+        """Build per-cell flags for the preview ( /api/check has no flags array )."""
+        text = file_bytes.decode("utf-8-sig", errors="replace")
+        rows = list(csv.reader(io.StringIO(text)))
+        if not rows:
+            return []
+
+        header = rows[0]
+        data_rows = rows[1 : 1 + PREVIEW_FLAG_SCAN_LIMIT]
+        cols = (check_data or {}).get("columns") or {}
+        transaction_col = cols.get("transaction_id")
+        batch_col = cols.get("batch")
+
+        header_index = {name: idx for idx, name in enumerate(header)}
+        batch_idx = header_index.get(batch_col) if batch_col else None
+        max_batch_len = 0
+        if batch_idx is not None:
+            for row in data_rows:
+                if batch_idx >= len(row):
+                    continue
+                value = (row[batch_idx] or "").strip()
+                if value.isdigit():
+                    max_batch_len = max(max_batch_len, len(value))
+
+        flags = []
+        for row_index, row in enumerate(data_rows):
+            if len(flags) >= PREVIEW_FLAG_MAX:
+                break
+            for col_index, column_name in enumerate(header):
+                value = (row[col_index] if col_index < len(row) else "").strip()
+                if not value:
+                    continue
+
+                if _SCI_PATTERN.match(value):
+                    flags.append(
+                        {
+                            "column": column_name,
+                            "row_index": row_index,
+                            "issue_type": "scientific_notation",
+                            "detail": "Scientific notation: %s" % value,
+                        }
+                    )
+                elif column_name == transaction_col and self._is_probable_date_token(value):
+                    flags.append(
+                        {
+                            "column": column_name,
+                            "row_index": row_index,
+                            "issue_type": "sku_corruption",
+                            "detail": "Date-like token in identifier column: %s" % value,
+                        }
+                    )
+                elif (
+                    column_name == batch_col
+                    and max_batch_len >= 3
+                    and value.isdigit()
+                    and len(value) < max_batch_len
+                ):
+                    flags.append(
+                        {
+                            "column": column_name,
+                            "row_index": row_index,
+                            "issue_type": "missing_leading_zero",
+                            "detail": "Possible stripped leading zero: %s" % value,
+                        }
+                    )
+
+                if len(flags) >= PREVIEW_FLAG_MAX:
+                    break
+        return flags
 
     def _build_preview_data(self, file_bytes, flags, total_rows):
         """Build JSON payload for the interactive preview widget."""
@@ -261,7 +392,8 @@ class TrueFormatCheckWizard(models.TransientModel):
         if sku_examples:
             detail_lines += ["", _("Examples of corrupted values: %s") % sku_examples]
 
-        flags = data.get("flags") or []
+        # /api/check returns summary only — scan locally so error cells light up red.
+        flags = data.get("flags") or self._scan_preview_flags(file_bytes, data)
         preview = self._build_preview_data(file_bytes, flags, rows)
 
         self.write(
@@ -306,19 +438,50 @@ class TrueFormatCheckWizard(models.TransientModel):
         self.ensure_one()
         filename, file_bytes = self._validate_csv_upload()
         icp = self.env["ir.config_parameter"].sudo()
-        response = self._post_csv(icp.get_param(PARAM_FIX_ENDPOINT, DEFAULT_FIX_ENDPOINT))
+        fix_endpoint = icp.get_param(PARAM_FIX_ENDPOINT, DEFAULT_FIX_ENDPOINT)
+        response = self._post_csv(fix_endpoint)
+        fixed_bytes = self._extract_fixed_csv(response)
 
-        if not response.content or "text/csv" not in response.headers.get(
-            "Content-Type", ""
-        ):
-            raise UserError(_("TrueFormat returned an unexpected response."))
+        # Temporary debug: confirm what the API actually returned (bytes, not original upload).
+        _logger.info(
+            "TrueFormat action_fix: endpoint=%s status=%s content_type=%s "
+            "len(response.content)=%s len(fixed_bytes)=%s first_200=%r",
+            fix_endpoint,
+            response.status_code,
+            response.headers.get("Content-Type"),
+            len(response.content or b""),
+            len(fixed_bytes or b""),
+            (fixed_bytes or b"")[:200],
+        )
+
+        fixed_b64 = self._b64_store(fixed_bytes)
+        fixed_name = "fixed_%s" % filename
 
         self.write(
             {
-                "fixed_file": base64.b64encode(response.content),
-                "fixed_filename": "fixed_%s" % filename,
+                "fixed_file": fixed_b64,
+                "fixed_filename": fixed_name,
+                # Keep the corrected file as the wizard upload so a follow-up
+                # Check File uses the fixed bytes, not the original.
+                "csv_file": fixed_b64,
+                "csv_filename": fixed_name,
             }
         )
+
+        # Re-run check against the fixed CSV so the on-screen preview reflects current issues.
+        check_response = self._post_file_bytes(
+            icp.get_param(PARAM_ENDPOINT, DEFAULT_ENDPOINT),
+            fixed_name,
+            fixed_bytes,
+        )
+        try:
+            check_data = check_response.json()
+        except ValueError:
+            raise UserError(_("TrueFormat returned an unexpected response."))
+        if check_data.get("status") != "ok":
+            raise UserError(_("TrueFormat returned an unexpected response."))
+
+        self._apply_check_result(check_data, fixed_bytes)
         return self._reopen()
 
     def action_reset(self):

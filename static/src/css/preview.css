@@ -101,13 +101,23 @@
     text-overflow: ellipsis;
 }
 
-.o_trueformat_preview tbody tr:hover td {
+.o_trueformat_preview tbody tr:hover td:not(.o_trueformat_preview__cell--error) {
     background: #fafbfc;
 }
 
+.o_trueformat_preview tbody tr.o_trueformat_preview__row--error {
+    background: #fff5f5;
+}
+
 .o_trueformat_preview__cell--error {
-    background: #ffe4e6 !important;
-    color: #9f1239;
+    background: #fecaca !important;
+    color: #991b1b !important;
+    font-weight: 600;
+    box-shadow: inset 3px 0 0 #dc2626;
+}
+
+.o_trueformat_preview__cell--error .o_trueformat_preview__issue-tip {
+    color: #991b1b;
 }
 
 .o_trueformat_preview__summary {
