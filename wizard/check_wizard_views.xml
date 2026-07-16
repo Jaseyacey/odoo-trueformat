@@ -7,21 +7,60 @@
         <field name="arch" type="xml">
             <form string="TrueFormat CSV Integrity Check">
                 <sheet>
-                    <group invisible="state != 'draft'">
-                        <field name="csv_file" filename="csv_filename"/>
-                        <field name="csv_filename" invisible="1"/>
-                    </group>
-                    <div invisible="state != 'draft'" class="text-muted">
-                        The file is checked in-memory. Nothing is stored.
-                        Limits: .csv files up to 20 MB / 250,000 rows.
+                    <div class="text-muted mb-2">
+                        Attach one or more CSV files. Each file is checked in-memory.
+                        Nothing is stored. Limits: .csv files up to 20 MB / 250,000 rows.
                     </div>
-                    <div invisible="state != 'draft'" class="alert alert-info mt-2" role="alert">
+                    <div class="alert alert-info" role="alert">
                         Requires a TrueFormat API key in
                         Settings → Technical → Parameters → System Parameters
                         (<code>trueformat.api_key</code>).
                     </div>
 
-                    <div invisible="state != 'done'">
+                    <div class="alert alert-success mt-2" role="alert" invisible="not batch_summary">
+                        <field name="batch_summary" nolabel="1" readonly="1"/>
+                    </div>
+
+                    <field name="line_ids" nolabel="1">
+                        <list editable="bottom" create="1" delete="1">
+                            <field name="sequence" widget="handle"/>
+                            <field name="csv_file" widget="binary" filename="csv_filename" string="File"/>
+                            <field name="csv_filename" column_invisible="1"/>
+                            <field name="state" widget="badge"
+                                   decoration-success="state in ('checked', 'fixed') and issues_found == 0"
+                                   decoration-warning="state in ('checked', 'fixed') and issues_found &gt; 0"
+                                   decoration-danger="state == 'error'"
+                                   decoration-muted="state == 'pending'"/>
+                            <field name="issues_found" string="Issues"/>
+                            <field name="row_count" string="Rows"/>
+                            <field name="error_message" string="Error" optional="show"
+                                   invisible="state != 'error'"/>
+                            <button name="action_check" type="object" string="Check"
+                                    icon="fa-search"
+                                    invisible="state not in ('pending', 'error')"/>
+                            <button name="action_fix" type="object" string="Fix"
+                                    icon="fa-wrench"
+                                    invisible="state != 'checked' or issues_found == 0"/>
+                            <button name="action_show_detail" type="object" string="Preview"
+                                    icon="fa-eye"
+                                    invisible="state not in ('checked', 'fixed', 'error')"/>
+                        </list>
+                    </field>
+
+                    <separator string="File Detail" invisible="not selected_line_id"/>
+
+                    <group invisible="not selected_line_id">
+                        <field name="selected_line_id" invisible="1"/>
+                        <field name="selected_csv_filename" string="File" readonly="1"/>
+                        <field name="selected_state" string="Status" widget="badge" readonly="1"/>
+                    </group>
+
+                    <div class="alert alert-danger mt-2" role="alert"
+                         invisible="not selected_error_message">
+                        <field name="selected_error_message" nolabel="1" readonly="1"/>
+                    </div>
+
+                    <div invisible="selected_state not in ('checked', 'fixed')">
                         <field name="issues_found" invisible="1"/>
                         <field name="row_count" invisible="1"/>
                         <field name="result_summary" invisible="1"/>
@@ -42,13 +81,13 @@
                 </sheet>
 
                 <footer>
-                    <button name="action_check" string="Check File" type="object"
-                            class="btn-primary" invisible="state != 'draft'"/>
-                    <button name="action_fix" string="Fix All Columns" type="object"
+                    <button name="action_check_all" string="Check All" type="object"
+                            class="btn-primary" invisible="not line_ids"/>
+                    <button name="action_fix_selected" string="Fix All Columns" type="object"
                             class="btn-primary"
-                            invisible="state != 'done' or fixed_file or issues_found == 0"/>
-                    <button name="action_reset" string="Check Another" type="object"
-                            class="btn-secondary" invisible="state != 'done'"/>
+                            invisible="selected_state != 'checked' or issues_found == 0"/>
+                    <button name="action_reset" string="Start Over" type="object"
+                            class="btn-secondary" invisible="not line_ids"/>
                     <button string="Close" class="btn-secondary" special="cancel"/>
                 </footer>
             </form>

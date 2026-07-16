@@ -6,7 +6,7 @@ import json
 import logging
 import re
 
-from odoo import _, fields, models
+from odoo import _, api, fields, models
 from odoo.exceptions import UserError
 
 _logger = logging.getLogger(__name__)
@@ -46,27 +46,11 @@ _MONTH_TOKEN_PATTERN = re.compile(
 )
 
 
-class TrueFormatCheckWizard(models.TransientModel):
-    _name = "trueformat.check.wizard"
-    _description = "TrueFormat CSV Integrity Check"
+class TrueFormatApiMixin(models.AbstractModel):
+    """Shared TrueFormat API helpers used by the wizard and its file lines."""
 
-    # attachment=False keeps bytes on the transient record so the dialog download
-    # still has the corrected payload after _reopen() (ir.attachment links on
-    # TransientModel are unreliable across the client round-trip).
-    csv_file = fields.Binary(string="CSV File", required=True, attachment=False)
-    csv_filename = fields.Char(string="Filename")
-
-    state = fields.Selection(
-        [("draft", "Upload"), ("done", "Result")],
-        default="draft",
-    )
-    result_summary = fields.Char(string="Summary", readonly=True)
-    result_detail = fields.Text(string="Report", readonly=True)
-    issues_found = fields.Integer(string="Issues Found", readonly=True)
-    row_count = fields.Integer(string="Rows Checked", readonly=True)
-    preview_data = fields.Text(string="Preview Data", readonly=True)
-    fixed_file = fields.Binary(string="Corrected File", readonly=True, attachment=False)
-    fixed_filename = fields.Char(readonly=True)
+    _name = "trueformat.api.mixin"
+    _description = "TrueFormat API Helpers"
 
     def _get_config(self):
         """Read endpoint + API key from system parameters."""
@@ -143,12 +127,8 @@ class TrueFormatCheckWizard(models.TransientModel):
             raise UserError(self._api_error_message(response))
         return response
 
-    def _post_csv(self, endpoint):
-        """Validate the attached CSV and POST it to a TrueFormat endpoint."""
-        filename, file_bytes = self._validate_csv_upload()
-        return self._post_file_bytes(endpoint, filename, file_bytes)
-
-    def _extract_fixed_csv(self, response):
+    @staticmethod
+    def _extract_fixed_csv(response):
         """Normalize fix endpoint responses into raw CSV bytes."""
         content_type = (response.headers.get("Content-Type") or "").lower()
 
@@ -181,9 +161,54 @@ class TrueFormatCheckWizard(models.TransientModel):
 
         raise UserError(_("TrueFormat returned an unexpected response."))
 
-    def _b64_store(self, raw_bytes):
+    @staticmethod
+    def _b64_store(raw_bytes):
         """Encode raw file bytes for an Odoo Binary field (ASCII str, not bytes)."""
         return base64.b64encode(raw_bytes).decode("ascii")
+
+    @staticmethod
+    def _user_error_text(exc):
+        if exc.args:
+            return str(exc.args[0])
+        return str(exc)
+
+
+class TrueFormatCheckWizardLine(models.TransientModel):
+    _name = "trueformat.check.wizard.line"
+    _description = "TrueFormat CSV Check File"
+    _inherit = "trueformat.api.mixin"
+    _order = "sequence, id"
+
+    wizard_id = fields.Many2one(
+        "trueformat.check.wizard",
+        string="Wizard",
+        required=True,
+        ondelete="cascade",
+    )
+    sequence = fields.Integer(default=10)
+    # attachment=False keeps bytes on the transient record so the dialog download
+    # still has the corrected payload after _reopen().
+    csv_file = fields.Binary(string="CSV File", required=True, attachment=False)
+    csv_filename = fields.Char(string="Filename")
+    state = fields.Selection(
+        [
+            ("pending", "Pending"),
+            ("checked", "Checked"),
+            ("fixed", "Fixed"),
+            ("error", "Error"),
+        ],
+        string="Status",
+        default="pending",
+        readonly=True,
+    )
+    issues_found = fields.Integer(string="Issues Found", readonly=True)
+    row_count = fields.Integer(string="Rows Checked", readonly=True)
+    result_summary = fields.Char(string="Summary", readonly=True)
+    result_detail = fields.Text(string="Report", readonly=True)
+    preview_data = fields.Text(string="Preview Data", readonly=True)
+    fixed_file = fields.Binary(string="Corrected File", readonly=True, attachment=False)
+    fixed_filename = fields.Char(readonly=True)
+    error_message = fields.Char(string="Error", readonly=True)
 
     def _validate_csv_upload(self):
         if not self.csv_file:
@@ -356,7 +381,6 @@ class TrueFormatCheckWizard(models.TransientModel):
         }
 
     def _apply_check_result(self, data, file_bytes):
-        # Parse TrueFormat's actual response shape
         summary_data = data.get("summary", {}) or {}
         if not isinstance(summary_data, dict):
             summary_data = {}
@@ -399,20 +423,178 @@ class TrueFormatCheckWizard(models.TransientModel):
                     "need the latest Fix All Columns output."
                 ),
             ]
-        # /api/check returns summary only — scan locally so error cells light up red.
         flags = data.get("flags") or self._scan_preview_flags(file_bytes, data)
         preview = self._build_preview_data(file_bytes, flags, rows)
 
+        state = "fixed" if self.fixed_file else "checked"
         self.write(
             {
-                "state": "done",
+                "state": state,
                 "issues_found": issues,
                 "row_count": rows,
                 "result_summary": summary,
                 "result_detail": "\n".join(detail_lines),
                 "preview_data": json.dumps(preview),
+                "error_message": False,
             }
         )
+
+    def _run_check(self):
+        """POST this line's CSV to /api/check and store results on the line."""
+        self.ensure_one()
+        filename, file_bytes = self._validate_csv_upload()
+        icp = self.env["ir.config_parameter"].sudo()
+        endpoint = icp.get_param(PARAM_ENDPOINT, DEFAULT_ENDPOINT)
+        response = self.wizard_id._post_file_bytes(endpoint, filename, file_bytes)
+
+        try:
+            data = response.json()
+        except ValueError:
+            raise UserError(_("TrueFormat returned an unexpected response."))
+        if data.get("status") != "ok":
+            raise UserError(_("TrueFormat returned an unexpected response."))
+
+        self._apply_check_result(data, file_bytes)
+
+    def _mark_error(self, exc):
+        self.write(
+            {
+                "state": "error",
+                "error_message": self._user_error_text(exc),
+                "issues_found": 0,
+                "row_count": 0,
+                "result_summary": False,
+                "result_detail": False,
+                "preview_data": False,
+            }
+        )
+
+    def action_check(self):
+        """Check this file only."""
+        self.ensure_one()
+        try:
+            self._run_check()
+        except UserError as exc:
+            self._mark_error(exc)
+        self.wizard_id.selected_line_id = self
+        return self.wizard_id._reopen()
+
+    def action_fix(self):
+        """Fetch a corrected copy of this line's CSV from the TrueFormat API."""
+        self.ensure_one()
+        try:
+            filename, file_bytes = self._validate_csv_upload()
+            icp = self.env["ir.config_parameter"].sudo()
+            fix_endpoint = icp.get_param(PARAM_FIX_ENDPOINT, DEFAULT_FIX_ENDPOINT)
+            response = self.wizard_id._post_file_bytes(fix_endpoint, filename, file_bytes)
+            fixed_bytes = self._extract_fixed_csv(response)
+
+            fixed_b64 = self._b64_store(fixed_bytes)
+            fixed_name = "fixed_%s" % filename
+
+            self.write(
+                {
+                    "fixed_file": fixed_b64,
+                    "fixed_filename": fixed_name,
+                    "csv_file": fixed_b64,
+                    "csv_filename": fixed_name,
+                }
+            )
+
+            check_response = self.wizard_id._post_file_bytes(
+                icp.get_param(PARAM_ENDPOINT, DEFAULT_ENDPOINT),
+                fixed_name,
+                fixed_bytes,
+            )
+            try:
+                check_data = check_response.json()
+            except ValueError:
+                raise UserError(_("TrueFormat returned an unexpected response."))
+            if check_data.get("status") != "ok":
+                raise UserError(_("TrueFormat returned an unexpected response."))
+
+            self._apply_check_result(check_data, fixed_bytes)
+        except UserError as exc:
+            self._mark_error(exc)
+        self.wizard_id.selected_line_id = self
+        return self.wizard_id._reopen()
+
+    def action_show_detail(self):
+        """Open this line's preview and results in the wizard detail panel."""
+        self.ensure_one()
+        self.wizard_id.selected_line_id = self
+        return self.wizard_id._reopen()
+
+
+class TrueFormatCheckWizard(models.TransientModel):
+    _name = "trueformat.check.wizard"
+    _description = "TrueFormat CSV Integrity Check"
+    _inherit = "trueformat.api.mixin"
+
+    line_ids = fields.One2many(
+        "trueformat.check.wizard.line",
+        "wizard_id",
+        string="CSV Files",
+    )
+    selected_line_id = fields.Many2one(
+        "trueformat.check.wizard.line",
+        string="Selected File",
+        domain="[('wizard_id', '=', id)]",
+        ondelete="set null",
+    )
+    batch_summary = fields.Char(string="Batch Summary", readonly=True)
+
+    # Computed mirrors of the selected line — used by the detail panel and preview
+    # widget so each file's preview stays isolated to its own line record.
+    result_summary = fields.Char(compute="_compute_selected_line_display", readonly=True)
+    result_detail = fields.Text(compute="_compute_selected_line_display", readonly=True)
+    issues_found = fields.Integer(compute="_compute_selected_line_display", readonly=True)
+    row_count = fields.Integer(compute="_compute_selected_line_display", readonly=True)
+    preview_data = fields.Text(compute="_compute_selected_line_display", readonly=True)
+    fixed_file = fields.Binary(compute="_compute_selected_line_display", readonly=True)
+    fixed_filename = fields.Char(compute="_compute_selected_line_display", readonly=True)
+    selected_state = fields.Selection(
+        related="selected_line_id.state",
+        readonly=True,
+    )
+    selected_error_message = fields.Char(
+        related="selected_line_id.error_message",
+        readonly=True,
+    )
+    selected_csv_filename = fields.Char(
+        related="selected_line_id.csv_filename",
+        readonly=True,
+    )
+
+    @api.depends(
+        "selected_line_id",
+        "selected_line_id.result_summary",
+        "selected_line_id.result_detail",
+        "selected_line_id.issues_found",
+        "selected_line_id.row_count",
+        "selected_line_id.preview_data",
+        "selected_line_id.fixed_file",
+        "selected_line_id.fixed_filename",
+    )
+    def _compute_selected_line_display(self):
+        for wizard in self:
+            line = wizard.selected_line_id
+            if line:
+                wizard.result_summary = line.result_summary
+                wizard.result_detail = line.result_detail
+                wizard.issues_found = line.issues_found
+                wizard.row_count = line.row_count
+                wizard.preview_data = line.preview_data
+                wizard.fixed_file = line.fixed_file
+                wizard.fixed_filename = line.fixed_filename
+            else:
+                wizard.result_summary = False
+                wizard.result_detail = False
+                wizard.issues_found = 0
+                wizard.row_count = 0
+                wizard.preview_data = False
+                wizard.fixed_file = False
+                wizard.fixed_filename = False
 
     def _reopen(self):
         return {
@@ -423,86 +605,71 @@ class TrueFormatCheckWizard(models.TransientModel):
             "target": "new",
         }
 
-    def action_check(self):
-        """Send the uploaded CSV to the TrueFormat API and show the result."""
+    def action_check_all(self):
+        """Check every pending line sequentially; failures do not abort the batch."""
         self.ensure_one()
-        filename, file_bytes = self._validate_csv_upload()
-        icp = self.env["ir.config_parameter"].sudo()
-        response = self._post_csv(icp.get_param(PARAM_ENDPOINT, DEFAULT_ENDPOINT))
+        pending_lines = self.line_ids.filtered(lambda line: line.state == "pending")
+        if not pending_lines:
+            raise UserError(_("Add at least one CSV file with Pending status to check."))
 
-        try:
-            data = response.json()
-        except ValueError:
-            raise UserError(_("TrueFormat returned an unexpected response."))
-        if data.get("status") != "ok":
-            raise UserError(_("TrueFormat returned an unexpected response."))
+        checked = 0
+        failed = 0
+        total_issues = 0
+        last_line = False
 
-        self._apply_check_result(data, file_bytes)
-        return self._reopen()
+        for line in pending_lines:
+            try:
+                line._run_check()
+                checked += 1
+                total_issues += line.issues_found
+                last_line = line
+            except UserError as exc:
+                failed += 1
+                line._mark_error(exc)
+                last_line = line
 
-    def action_fix(self):
-        """Fetch a corrected copy of the CSV from the TrueFormat API."""
-        self.ensure_one()
-        filename, file_bytes = self._validate_csv_upload()
-        icp = self.env["ir.config_parameter"].sudo()
-        fix_endpoint = icp.get_param(PARAM_FIX_ENDPOINT, DEFAULT_FIX_ENDPOINT)
-        response = self._post_csv(fix_endpoint)
-        fixed_bytes = self._extract_fixed_csv(response)
-
-        # Temporary debug: confirm what the API actually returned (bytes, not original upload).
-        _logger.info(
-            "TrueFormat action_fix: endpoint=%s status=%s content_type=%s "
-            "len(response.content)=%s len(fixed_bytes)=%s first_200=%r",
-            fix_endpoint,
-            response.status_code,
-            response.headers.get("Content-Type"),
-            len(response.content or b""),
-            len(fixed_bytes or b""),
-            (fixed_bytes or b"")[:200],
-        )
-
-        fixed_b64 = self._b64_store(fixed_bytes)
-        fixed_name = "fixed_%s" % filename
-
+        summary = _(
+            "%(checked)s checked, %(failed)s failed, %(issues)s total issues"
+        ) % {
+            "checked": checked,
+            "failed": failed,
+            "issues": total_issues,
+        }
         self.write(
             {
-                "fixed_file": fixed_b64,
-                "fixed_filename": fixed_name,
-                # Keep the corrected file as the wizard upload so a follow-up
-                # Check File uses the fixed bytes, not the original.
-                "csv_file": fixed_b64,
-                "csv_filename": fixed_name,
+                "batch_summary": summary,
+                "selected_line_id": last_line.id if last_line else False,
             }
         )
 
-        # Re-run check against the fixed CSV so the on-screen preview reflects current issues.
-        check_response = self._post_file_bytes(
-            icp.get_param(PARAM_ENDPOINT, DEFAULT_ENDPOINT),
-            fixed_name,
-            fixed_bytes,
-        )
-        try:
-            check_data = check_response.json()
-        except ValueError:
-            raise UserError(_("TrueFormat returned an unexpected response."))
-        if check_data.get("status") != "ok":
-            raise UserError(_("TrueFormat returned an unexpected response."))
+        notification_type = "warning" if failed else "success"
+        return {
+            "type": "ir.actions.client",
+            "tag": "display_notification",
+            "params": {
+                "title": _("Check All complete"),
+                "message": summary,
+                "type": notification_type,
+                "sticky": False,
+                "next": self._reopen(),
+            },
+        }
 
-        self._apply_check_result(check_data, fixed_bytes)
-        return self._reopen()
+    def action_fix_selected(self):
+        """Fix the file currently shown in the detail panel."""
+        self.ensure_one()
+        if not self.selected_line_id:
+            raise UserError(_("Select a checked file first."))
+        return self.selected_line_id.action_fix()
 
     def action_reset(self):
+        """Clear all files and start a new session."""
         self.ensure_one()
         self.write(
             {
-                "state": "draft",
-                "result_summary": False,
-                "result_detail": False,
-                "preview_data": False,
-                "issues_found": 0,
-                "row_count": 0,
-                "fixed_file": False,
-                "fixed_filename": False,
+                "line_ids": [(5, 0, 0)],
+                "selected_line_id": False,
+                "batch_summary": False,
             }
         )
         return self._reopen()

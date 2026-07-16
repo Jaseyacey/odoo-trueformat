@@ -17,8 +17,10 @@
             </p>
             <p>
                 This module runs any CSV through <a href="https://trueformat.co.uk">TrueFormat</a>'s
-                integrity check directly from within Odoo, before you import. It flags exactly what
-                changed, returns a clear report, and can download a corrected copy of the file.
+                integrity check directly from within Odoo, before you import. Attach one file or
+                several CSVs in a single session — check each file, review its own interactive preview,
+                fix and download corrected copies one at a time. <b>Check All</b> processes a whole
+                batch sequentially; per-file failures never abort the rest.
             </p>
         </div>
     </div>
@@ -88,14 +90,16 @@
         <div class="oe_span12">
             <h2 class="oe_slogan">How it works</h2>
             <ol>
-                <li>Open <b>TrueFormat &rarr; CSV Integrity Check</b> and attach a <code>.csv</code> file
-                    (up to 20&nbsp;MB / 250,000 rows).</li>
-                <li>Click <b>Check File</b> — the report lists every flagged cell or column with its
-                    issue type, location, original value and an explanation.</li>
-                <li>Optionally click <b>Get Corrected File</b> to download a copy with safe mechanical
-                    corrections applied. Issues that need human judgment, or where data was already
-                    destroyed by the spreadsheet tool, are never auto-fixed — they stay in the report
-                    so you can correct them at the source.</li>
+                <li>Open <b>TrueFormat &rarr; CSV Integrity Check</b> and attach one or more
+                    <code>.csv</code> files (up to 20&nbsp;MB / 250,000 rows each).</li>
+                <li>Click <b>Check</b> on a single file or <b>Check All</b> to process every pending
+                    file — the report lists every flagged cell or column with its issue type,
+                    location, original value and an explanation.</li>
+                <li>Click <b>Preview</b> on any checked file to open its own interactive preview.
+                    Optionally click <b>Fix All Columns</b> to download a corrected copy for that
+                    file. Issues that need human judgment, or where data was already destroyed by
+                    the spreadsheet tool, are never auto-fixed — they stay in the report so you can
+                    correct them at the source.</li>
             </ol>
             <p class="oe_mt32">
                 The module is a thin connector: all detection logic runs on the TrueFormat API, files

@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 {
     "name": "TrueFormat CSV Integrity Check",
-    "version": "19.0.1.0.4",
-    "summary": "Catch silent CSV corruption before it reaches Odoo's import engine.",
+    "version": "19.0.1.1.0",
+    "summary": "Catch silent CSV corruption before it reaches Odoo's import engine — one file or many.",
     "description": """
 TrueFormat CSV Integrity Check
 ==============================
@@ -14,10 +14,12 @@ so this corruption passes through undetected and surfaces later as
 reconciliation and reporting failures.
 
 This module lets you run any CSV through TrueFormat's integrity check directly
-from within Odoo, before you import. It flags exactly what changed and returns
-a clear report.
+from within Odoo, before you import. Attach one file or several CSVs in a
+single session: check each file, review its own interactive preview, fix and
+download corrected copies one at a time. Use Check All to process a whole batch
+sequentially — per-file failures never abort the rest.
 
-The file is processed in-memory. Nothing is written to disk.
+The files are processed in-memory. Nothing is written to disk.
 
 Requires an active TrueFormat subscription (£5,000 per year or £800 per month).
 Set your API key in Settings > Technical > Parameters > System Parameters.
