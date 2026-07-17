@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 {
     "name": "TrueFormat CSV Integrity Check",
-    "version": "19.0.1.1.0",
+    "version": "19.0.1.3.0",
     "summary": "Catch silent CSV corruption before it reaches Odoo's import engine — one file or many.",
     "description": """
 TrueFormat CSV Integrity Check
@@ -39,6 +39,7 @@ Set your API key in Settings > Technical > Parameters > System Parameters.
             "trueformat/static/src/css/preview.css",
             "trueformat/static/src/xml/preview_templates.xml",
             "trueformat/static/src/js/preview_widget.js",
+            "trueformat/static/src/js/check_wizard_form.js",
         ],
     },
     "images": ["static/description/banner.png"],

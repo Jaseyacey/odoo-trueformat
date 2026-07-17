@@ -48,12 +48,22 @@
                     </thead>
                     <tbody>
                         <tr t-foreach="displayRows" t-as="row" t-key="row.row_index"
-                            t-att-class="{'o_trueformat_preview__row--error': row.has_error}">
+                            t-att-class="{
+                                'o_trueformat_preview__row--error': row.has_error,
+                            }">
                             <td t-foreach="row.cells" t-as="cell" t-key="row.row_index + '_' + cell_index"
-                                t-att-class="{'o_trueformat_preview__cell--error': cell.has_error}"
+                                t-att-class="cellClass(cell)"
                                 t-att-title="cellTitle(cell)">
-                                <span t-att-class="{'o_trueformat_preview__issue-tip': cell.has_error}"
+                                <span t-att-class="{
+                                          'o_trueformat_preview__issue-tip': cell.has_error,
+                                          'o_trueformat_preview__issue-tip--warning': cellSeverity(cell) === 'warning',
+                                      }"
                                       t-esc="cell.value"/>
+                                <t t-if="cell.has_error">
+                                    <span t-foreach="cellIssueTypes(cell)" t-as="issueType" t-key="issueType"
+                                          t-att-class="badgeClass(issueType)"
+                                          t-esc="formatIssueType(issueType)"/>
+                                </t>
                             </td>
                         </tr>
                     </tbody>

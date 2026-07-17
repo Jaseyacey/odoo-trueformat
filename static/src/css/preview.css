@@ -101,12 +101,12 @@
     text-overflow: ellipsis;
 }
 
-.o_trueformat_preview tbody tr:hover td:not(.o_trueformat_preview__cell--error) {
+.o_trueformat_preview tbody tr:hover td:not(.o_trueformat_preview__cell--error):not(.o_trueformat_preview__cell--warning) {
     background: #fafbfc;
 }
 
 .o_trueformat_preview tbody tr.o_trueformat_preview__row--error {
-    background: #fff5f5;
+    background: #fffaf0;
 }
 
 .o_trueformat_preview__cell--error {
@@ -118,6 +118,42 @@
 
 .o_trueformat_preview__cell--error .o_trueformat_preview__issue-tip {
     color: #991b1b;
+}
+
+.o_trueformat_preview__cell--warning {
+    background: #fef3c7 !important;
+    color: #92400e !important;
+    font-weight: 600;
+    box-shadow: inset 3px 0 0 #d97706;
+}
+
+.o_trueformat_preview__cell--warning .o_trueformat_preview__issue-tip {
+    color: #92400e;
+}
+
+.o_trueformat_preview__badge {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1.4;
+    text-transform: lowercase;
+    vertical-align: middle;
+    white-space: nowrap;
+}
+
+.o_trueformat_preview__badge--error {
+    background: #fee2e2;
+    color: #b91c1c;
+    border: 1px solid #fecaca;
+}
+
+.o_trueformat_preview__badge--warning {
+    background: #ffedd5;
+    color: #c2410c;
+    border: 1px solid #fdba74;
 }
 
 .o_trueformat_preview__summary {
@@ -136,4 +172,58 @@
 .o_trueformat_preview__issue-tip {
     cursor: help;
     border-bottom: 1px dotted #be123c;
+}
+
+.o_trueformat_preview__issue-tip--warning {
+    border-bottom-color: #d97706;
+}
+
+/* In-dialog busy overlay while TrueFormat API calls run */
+.o_trueformat_loading_overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 255, 255, 0.72);
+    backdrop-filter: blur(1px);
+}
+
+.o_trueformat_loading_overlay__panel {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+    padding: 24px 28px;
+    border: 1px solid #d8dadd;
+    border-radius: 10px;
+    background: #fff;
+    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+}
+
+.o_trueformat_loading_overlay__spinner {
+    width: 36px;
+    height: 36px;
+    border: 3px solid #e5e7eb;
+    border-top-color: #2563eb;
+    border-radius: 50%;
+    animation: o-trueformat-spin 0.8s linear infinite;
+}
+
+.o_trueformat_loading_overlay__message {
+    font-size: 14px;
+    font-weight: 600;
+    color: #212529;
+}
+
+@keyframes o-trueformat-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.o_form_view.o_trueformat_busy_host,
+.o_trueformat_busy_host {
+    position: relative;
 }

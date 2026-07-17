@@ -32,17 +32,22 @@ PREVIEW_ROW_LIMIT = 1000
 PREVIEW_FLAG_SCAN_LIMIT = 5000
 PREVIEW_FLAG_MAX = 2000
 
-# Mirrors trueformat_backend/routes/health.py detection so cells can be marked
-# red even though /api/check does not return per-cell flags.
+# Local fallback heuristics when an older API omits detections.flags.
 _SCI_PATTERN = re.compile(r"^[+-]?\d+(\.\d+)?[Ee][+-]?\d+$")
+_TF_RECONSTRUCTED_PATTERN = re.compile(r"^TF-\d+$", re.IGNORECASE)
 _DATE_TOKEN_PATTERNS = (
     re.compile(r"^\d{1,2}[/-]\d{1,2}([/-]\d{2,4})?$"),
     re.compile(r"^\d{1,2}-[A-Za-z]{3}$"),
     re.compile(r"^[A-Za-z]{3}-\d{1,2}$"),
     re.compile(r"^\d{4}-\d{2}-\d{2}$"),
+    re.compile(r"^\d{4}\.\d{2}\.\d{2}$"),
+    re.compile(r"^\d{4}/\d{2}/\d{2}$"),
 )
 _MONTH_TOKEN_PATTERN = re.compile(
     r"(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)", re.IGNORECASE
+)
+_ID_LIKE_COLUMN_PATTERN = re.compile(
+    r"(id|sku|code|batch|lot|serial|ref|barcode|upc|ean|gtin)", re.IGNORECASE
 )
 
 
@@ -162,6 +167,34 @@ class TrueFormatApiMixin(models.AbstractModel):
         raise UserError(_("TrueFormat returned an unexpected response."))
 
     @staticmethod
+    def _parse_fix_headers(response):
+        """Read reconstruction metadata from /api/fix response headers."""
+        headers = response.headers or {}
+        meta = {}
+
+        count_raw = headers.get("X-TrueFormat-Reconstructed-Count")
+        if count_raw is not None and str(count_raw).strip() != "":
+            try:
+                meta["reconstructed_count"] = int(count_raw)
+            except (TypeError, ValueError):
+                pass
+
+        is_clean_raw = headers.get("X-TrueFormat-Is-Clean")
+        if is_clean_raw is not None:
+            meta["is_clean"] = str(is_clean_raw).strip().lower() == "true"
+
+        flags_raw = headers.get("X-TrueFormat-Reconstructed-Flags")
+        if flags_raw:
+            try:
+                parsed = json.loads(flags_raw)
+                if isinstance(parsed, list):
+                    meta["flags"] = parsed
+            except (TypeError, ValueError):
+                _logger.warning("Could not parse X-TrueFormat-Reconstructed-Flags header")
+
+        return meta
+
+    @staticmethod
     def _b64_store(raw_bytes):
         """Encode raw file bytes for an Odoo Binary field (ASCII str, not bytes)."""
         return base64.b64encode(raw_bytes).decode("ascii")
@@ -236,8 +269,90 @@ class TrueFormatCheckWizardLine(models.TransientModel):
             return True
         return False
 
+    @staticmethod
+    def _should_apply_leading_zero_padding(column_name, digit_values):
+        """Match backend: only pad when the column looks fixed-width or ID-like."""
+        if len(digit_values) < 2:
+            return False
+        lengths = [len(v) for v in digit_values]
+        max_len = max(lengths)
+        if max_len < 3:
+            return False
+        if not any(n < max_len for n in lengths):
+            return False
+
+        # Fixed-width: a clear majority already share the longest digit length.
+        same_max = sum(1 for n in lengths if n == max_len)
+        if same_max >= max(2, int(len(digit_values) * 0.5)):
+            return True
+
+        # ID-like column names (SKU, batch, lot, barcode, …).
+        if column_name and _ID_LIKE_COLUMN_PATTERN.search(column_name):
+            return True
+        return False
+
+    @staticmethod
+    def _normalize_api_flags(flags):
+        """Map API flag dicts to the preview widget shape."""
+        if not flags:
+            return []
+        normalized = []
+        for flag in flags:
+            if not isinstance(flag, dict):
+                continue
+            column = flag.get("column")
+            row_index = flag.get("row_index")
+            if column is None or row_index is None:
+                continue
+            try:
+                row_index = int(row_index)
+            except (TypeError, ValueError):
+                continue
+
+            issue_type = flag.get("issue_type") or "issue"
+            detail = (flag.get("detail") or "").strip()
+            original = flag.get("original_value")
+            if original and issue_type == "reconstructed":
+                original = str(original)
+                if original and original not in detail:
+                    detail = (
+                        "%s (original: %s)" % (detail, original)
+                        if detail
+                        else "original: %s" % original
+                    )
+
+            normalized.append(
+                {
+                    "column": column,
+                    "row_index": row_index,
+                    "issue_type": issue_type,
+                    "detail": detail,
+                }
+            )
+        return normalized
+
+    @staticmethod
+    def _merge_preview_flags(*flag_lists):
+        """Deduplicate flags by (column, row_index, issue_type)."""
+        merged = []
+        seen = set()
+        for flags in flag_lists:
+            for flag in flags or []:
+                key = (
+                    flag.get("column"),
+                    flag.get("row_index"),
+                    flag.get("issue_type"),
+                )
+                if key in seen:
+                    continue
+                seen.add(key)
+                merged.append(flag)
+                if len(merged) >= PREVIEW_FLAG_MAX:
+                    return merged
+        return merged
+
     def _scan_preview_flags(self, file_bytes, check_data):
-        """Build per-cell flags for the preview ( /api/check has no flags array )."""
+        """Fallback local heuristics when the API omits detections.flags."""
         text = file_bytes.decode("utf-8-sig", errors="replace")
         rows = list(csv.reader(io.StringIO(text)))
         if not rows:
@@ -252,13 +367,19 @@ class TrueFormatCheckWizardLine(models.TransientModel):
         header_index = {name: idx for idx, name in enumerate(header)}
         batch_idx = header_index.get(batch_col) if batch_col else None
         max_batch_len = 0
+        apply_batch_padding = False
         if batch_idx is not None:
+            digit_values = []
             for row in data_rows:
                 if batch_idx >= len(row):
                     continue
                 value = (row[batch_idx] or "").strip()
                 if value.isdigit():
+                    digit_values.append(value)
                     max_batch_len = max(max_batch_len, len(value))
+            apply_batch_padding = self._should_apply_leading_zero_padding(
+                batch_col, digit_values
+            )
 
         flags = []
         for row_index, row in enumerate(data_rows):
@@ -269,7 +390,16 @@ class TrueFormatCheckWizardLine(models.TransientModel):
                 if not value:
                     continue
 
-                if _SCI_PATTERN.match(value):
+                if _TF_RECONSTRUCTED_PATTERN.match(value):
+                    flags.append(
+                        {
+                            "column": column_name,
+                            "row_index": row_index,
+                            "issue_type": "reconstructed",
+                            "detail": "reconstructed — verify at source: %s" % value,
+                        }
+                    )
+                elif _SCI_PATTERN.match(value):
                     flags.append(
                         {
                             "column": column_name,
@@ -288,7 +418,8 @@ class TrueFormatCheckWizardLine(models.TransientModel):
                         }
                     )
                 elif (
-                    column_name == batch_col
+                    apply_batch_padding
+                    and column_name == batch_col
                     and max_batch_len >= 3
                     and value.isdigit()
                     and len(value) < max_batch_len
@@ -380,12 +511,48 @@ class TrueFormatCheckWizardLine(models.TransientModel):
             "total_issues": sum(column_counts.values()) or len(flags),
         }
 
-    def _apply_check_result(self, data, file_bytes):
+    def _apply_check_result(self, data, file_bytes, fix_meta=None):
+        """Persist check (and optional /api/fix header) results onto this line."""
+        fix_meta = fix_meta or {}
         summary_data = data.get("summary", {}) or {}
         if not isinstance(summary_data, dict):
             summary_data = {}
-        issues = summary_data.get("issue_count", 0)
-        rows = summary_data.get("rows_checked", 0)
+        detections = data.get("detections") or {}
+        if not isinstance(detections, dict):
+            detections = {}
+        detection_summary = detections.get("summary") or {}
+        if not isinstance(detection_summary, dict):
+            detection_summary = {}
+
+        summary_issues = int(summary_data.get("issue_count") or 0)
+        detection_issues = int(detections.get("issues_found") or 0)
+        issues = max(summary_issues, detection_issues)
+
+        if "reconstructed" in detection_summary:
+            reconstructed = int(detection_summary.get("reconstructed") or 0)
+        else:
+            reconstructed = 0
+        if fix_meta.get("reconstructed_count") is not None:
+            reconstructed = max(
+                reconstructed, int(fix_meta.get("reconstructed_count") or 0)
+            )
+
+        if "is_clean" in data:
+            is_clean = bool(data.get("is_clean"))
+        else:
+            is_clean = issues == 0
+
+        # /api/fix may report remaining reconstructed values even when SKU counts are 0.
+        if fix_meta.get("is_clean") is False:
+            is_clean = False
+        if not is_clean and issues == 0:
+            issues = max(reconstructed, 1)
+
+        rows = int(
+            summary_data.get("rows_checked")
+            or detections.get("row_count")
+            or 0
+        )
 
         sci = summary_data.get("scientific_notation_count", 0)
         zeros = summary_data.get("missing_leading_zero_count", 0)
@@ -399,23 +566,42 @@ class TrueFormatCheckWizardLine(models.TransientModel):
 
         summary = (
             _("No issues found - file is clean. %s rows checked.") % rows
-            if not issues
-            else _("%(issues)s issue(s) found across %(rows)s rows.") % {"issues": issues, "rows": rows}
+            if is_clean
+            else _("%(issues)s issue(s) found across %(rows)s rows.")
+            % {"issues": issues, "rows": rows}
         )
 
         detail_lines = [
             _("Rows checked: %s") % rows,
             _("Total issues: %s") % issues,
+            _("Clean: %s") % (_("yes") if is_clean else _("no")),
             "",
             _("Scientific notation: %s") % sci,
             _("Stripped leading zeros: %s") % zeros,
             _("SKU corruption: %s") % sku,
-            "",
-            _("Affected columns: %s") % sci_cols,
         ]
+
+        # Detection-module counts (new API); omit when the block is absent.
+        if detection_summary or reconstructed:
+            detail_lines += [
+                "",
+                _("Hidden characters: %s")
+                % detection_summary.get("hidden_characters", 0),
+                _("Format flips: %s") % detection_summary.get("format_flips", 0),
+                _("Normalized duplicates: %s")
+                % detection_summary.get("normalized_duplicates", 0),
+                _("Mixed formats: %s") % detection_summary.get("mixed_formats", 0),
+                _("Reconstructed: %s") % reconstructed,
+            ]
+
+        report_summary = detections.get("report_summary")
+        if report_summary:
+            detail_lines += ["", str(report_summary)]
+
+        detail_lines += ["", _("Affected columns: %s") % sci_cols]
         if sku_examples:
             detail_lines += ["", _("Examples of corrupted values: %s") % sku_examples]
-        if self.fixed_file and issues:
+        if self.fixed_file and not is_clean:
             detail_lines += [
                 "",
                 _(
@@ -423,7 +609,17 @@ class TrueFormatCheckWizardLine(models.TransientModel):
                     "need the latest Fix All Columns output."
                 ),
             ]
-        flags = data.get("flags") or self._scan_preview_flags(file_bytes, data)
+
+        api_flags = detections.get("flags") or data.get("flags")
+        if api_flags:
+            flags = self._normalize_api_flags(api_flags)
+        else:
+            flags = self._scan_preview_flags(file_bytes, data)
+
+        fix_flags = self._normalize_api_flags(fix_meta.get("flags") or [])
+        if fix_flags:
+            flags = self._merge_preview_flags(flags, fix_flags)
+
         preview = self._build_preview_data(file_bytes, flags, rows)
 
         state = "fixed" if self.fixed_file else "checked"
@@ -488,6 +684,7 @@ class TrueFormatCheckWizardLine(models.TransientModel):
             fix_endpoint = icp.get_param(PARAM_FIX_ENDPOINT, DEFAULT_FIX_ENDPOINT)
             response = self.wizard_id._post_file_bytes(fix_endpoint, filename, file_bytes)
             fixed_bytes = self._extract_fixed_csv(response)
+            fix_meta = self._parse_fix_headers(response)
 
             fixed_b64 = self._b64_store(fixed_bytes)
             fixed_name = "fixed_%s" % filename
@@ -513,7 +710,7 @@ class TrueFormatCheckWizardLine(models.TransientModel):
             if check_data.get("status") != "ok":
                 raise UserError(_("TrueFormat returned an unexpected response."))
 
-            self._apply_check_result(check_data, fixed_bytes)
+            self._apply_check_result(check_data, fixed_bytes, fix_meta=fix_meta)
         except UserError as exc:
             self._mark_error(exc)
         self.wizard_id.selected_line_id = self
@@ -602,6 +799,7 @@ class TrueFormatCheckWizard(models.TransientModel):
             "res_model": self._name,
             "res_id": self.id,
             "view_mode": "form",
+            "views": [(False, "form")],
             "target": "new",
         }
 

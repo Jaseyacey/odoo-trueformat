@@ -66,6 +66,12 @@
                         <field name="result_summary" invisible="1"/>
                         <field name="preview_data" widget="trueformat_preview" nolabel="1"/>
 
+                        <group string="Detection report" invisible="not result_detail" class="mt-3">
+                            <field name="result_detail" nolabel="1" readonly="1"
+                                   widget="text"
+                                   class="o_trueformat_result_detail"/>
+                        </group>
+
                         <group invisible="not fixed_file" class="mt-3">
                             <field name="fixed_file" filename="fixed_filename" readonly="1"/>
                             <field name="fixed_filename" invisible="1"/>
@@ -75,13 +81,14 @@
                             repairs the whole CSV (every row): scientific
                             notation, Excel date serials, date-coerced SKUs
                             (SEP-26 → TF-serial), quotes/semicolons, and
-                            leading zeros where recoverable.
+                            leading zeros where recoverable. Reconstructed
+                            values (TF-*) still need verification at source.
                         </div>
                     </div>
                 </sheet>
 
                 <footer>
-                    <button name="action_check_all" string="Check All" type="object"
+                    <button name="action_check_all" string="Save" type="object"
                             class="btn-primary" invisible="not line_ids"/>
                     <button name="action_fix_selected" string="Fix All Columns" type="object"
                             class="btn-primary"
